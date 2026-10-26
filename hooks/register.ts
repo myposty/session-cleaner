@@ -96,9 +96,13 @@ function labelSessions(now: number, rows: SessionRow[]) {
   return labels
 }
 
+// Claude's dialog always adds "Type something." (free text, used here as
+// search) and "Chat about this" (no API flag hides either). Chat about this,
+// like Esc, just closes.
 async function ask($: EngineInterface, question: string, options: string[]) {
   try {
-    return await $.ui.ask(question, { options, header: 'Sesiones' })
+    const answer = await $.ui.ask(question, { options, header: 'Sesiones' })
+    return /^chat about this$/i.test(answer.trim()) ? undefined : answer
   } catch {
     return undefined // Esc
   }
