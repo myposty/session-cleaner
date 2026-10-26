@@ -103,7 +103,7 @@ async function summarize(file) {
     } catch {}
   }
   const title = custom || ai || summary || first
-  return { title: title ? title.slice(0, 200) : '', messages, branch: branch === 'HEAD' ? '' : branch }
+  return { title: title ? title.slice(0, 200) : '', firstPrompt: first.slice(0, 600), messages, branch: branch === 'HEAD' ? '' : branch }
 }
 
 async function list(cwd) {
@@ -118,9 +118,9 @@ async function list(cwd) {
       if (!UUID.test(id) || byId.has(id)) continue
       const file = path.join(projectsRoot, dir, name)
       const stat = fs.statSync(file)
-      const { title, messages, branch } = await summarize(file)
+      const { title, firstPrompt, messages, branch } = await summarize(file)
       if (!title) continue
-      byId.set(id, { id, title, messages, branch, mtime: stat.mtimeMs, size: stat.size, isRunning: running.has(id) })
+      byId.set(id, { id, title, firstPrompt, messages, branch, mtime: stat.mtimeMs, size: stat.size, isRunning: running.has(id) })
     }
   }
   return [...byId.values()].sort((a, b) => b.mtime - a.mtime)

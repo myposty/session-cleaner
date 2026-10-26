@@ -5,17 +5,14 @@ Abrí y borrá conversaciones de Claude Code con `/sessions`.
 Escribís `/sessions` y aparece el diálogo propio de Claude con tus sesiones del proyecto (sin la caja de escribir). Elegís una con ↑↓ + Enter y decidís: **Abrir** o **Eliminar 🗑**. Al eliminar, esa conversación desaparece con todos sus temporales. Nada más que esa. `/resume` sigue siendo el original de Claude.
 
 ```
- Elegí una sesión (página 1 de 6) · "Type something" busca por título
+ Elegí una sesión (página 1 de 6)
 
- ❯ 1. deleter_claude
-      ahora · 6.7 MB · abierta
-   2. Session-cleaner plugin update
-      hace 26 min · 514 KB
-   3. vocero
-      hace 26 min · 174.1 MB · abierta
-   4. Más ▸
-      15 sesiones más
-   5. Type something.
+ ❯ 1. deleter_claude        │ deleter_claude
+   2. vocero                │ ahora · main · 6.7 MB · abierta
+   3. Session-cleaner…      │ 412 mensajes
+   4. Más ▸                 │
+                            │ Primer mensaje:
+                            │ como se hacen aplicaciones…
 
  Enter to select · ↑/↓ to navigate · Esc to cancel
 ```
@@ -54,12 +51,11 @@ O solo para una sesión: `claude --plugin-dir "C:\ruta\a\session-cleaner"`.
 | `/sessions` | Abre la lista de sesiones del proyecto actual |
 | ↑↓ + Enter | Elige una sesión |
 | `Más ▸` | Siguientes 3 sesiones |
-| `Type something` | Busca por título |
 | `Abrir` | Retoma la sesión (usa el `/resume` original) |
 | `Eliminar 🗑` → `Sí, eliminar` | Borra esa sesión y sus temporales |
 | Esc | Cierra |
 
-El diálogo de Claude muestra hasta 4 opciones, por eso la lista va de a 3 sesiones por página. Las sesiones abiertas en otra terminal dicen `abierta` y no se pueden borrar.
+El diálogo de Claude muestra hasta 4 opciones, por eso la lista va de a 3 sesiones por página. A la derecha ves el detalle de la sesión marcada. Las sesiones abiertas en otra terminal dicen `abierta` y no se pueden borrar.
 
 ## Qué borra exactamente
 
@@ -89,7 +85,8 @@ No toca otras sesiones, ni `history.jsonl`, ni configuración. Rechaza ids que n
 
 Es un mod de Claude Code (function hooks):
 
-- `hooks/register.ts`: toma `/resume` sin argumentos, dibuja el panel y maneja los botones. Si algo falla, cae al `/resume` original.
+- `hooks/register.ts`: registra `/sessions`, arma las páginas con el diálogo de preguntas de Claude y muestra el progreso al borrar.
+- `hooks/preview.mjs`: hook `PreToolUse` que agrega la vista previa a las opciones de `/sessions` (deja `~/.claude/session-cleaner/dialog.json`). Con vista previa, Claude no muestra la fila "Type something.". Las preguntas de otros no las toca.
 - `hooks/helper.ts`: script de Node que lista y borra. El mod lo ejecuta con `node --input-type=module -` porque el entorno de mods no tiene borrado de archivos.
 - `tests/pane.test.ts`: test de la pantalla (`claude plugin test .`).
 

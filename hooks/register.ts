@@ -16,8 +16,12 @@ const BACK = 'Volver'
 const CONFIRM = 'Sí, eliminar'
 const CANCEL = 'Cancelar'
 
-// Option label -> grey line under it, for the dialog that is up.
-let descriptions = new Map<string, string>()
+// Option label -> grey line and preview, for the dialog that is up.
+type Extra = { description?: string; preview: string }
+
+function count(value: number) {
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+}
 
 // Runs from the user's home, never the project folder: some platforms look up
 // a bare `node` in the working directory first, so an untrusted repo could
@@ -133,16 +137,32 @@ function labelSessions(now: number, rows: SessionRow[]) {
   return labels
 }
 
-// Claude's dialog always adds "Type something." (free text, used here as
-// search) and "Chat about this" (no API flag hides either). Chat about this,
-// like Esc, just closes.
-async function ask($: EngineInterface, question: string, options: string[]) {
+// Every option gets a preview: with one, Claude draws its preview layout
+// (list left, preview right) and leaves out the "Type something." row.
+// "Chat about this" is fixed in both layouts; picked, it closes like Esc.
+// Where hooks/preview.mjs picks up the open dialog's previews.
+async function dialogFile($: EngineInterface) {
+  const config = (await $.env.get('CLAUDE_CONFIG_DIR')) || `${await homeDir($)}/.claude`
+  return `${config}/session-cleaner/dialog.json`
+}
+
+async function ask($: EngineInterface, question: string, options: string[], previews: Map<string, Extra>) {
+  const file = await dialogFile($)
+  await $.fs.write(file, JSON.stringify({ question, options: Object.fromEntries(previews) }))
   try {
     const answer = await $.ui.ask(question, { options, header: 'Sesiones' })
     return /^chat about this$/i.test(answer.trim()) ? undefined : answer
   } catch {
     return undefined // Esc
+  } finally {
+    await $.fs.write(file, '{}')
   }
+}
+
+function sessionPreview(now: number, row: SessionRow) {
+  const lines = [clean(row.title), details(now, row), `${count(row.messages)} mensajes`]
+  if (row.firstPrompt !== '') lines.push('', 'Primer mensaje:', clean(row.firstPrompt))
+  return lines.join('\n')
 }
 
 async function remove($: EngineInterface, row: SessionRow) {
@@ -168,12 +188,13 @@ async function pickSession($: EngineInterface, rows: SessionRow[]) {
     const options = [...labels.keys()]
     if (pages > 1) options.push(page + 1 < pages ? MORE : FIRST)
     if (options.length < 2) options.push(FIRST)
-    descriptions = new Map([...labels].map(([label, row]) => [label, details(now, row)]))
-    descriptions.set(MORE, `${pool.length - (page + 1) * PAGE} sesiones más`)
+    const previews = new Map<string, Extra>([...labels].map(([label, row]) => [label, { description: details(now, row), preview: sessionPreview(now, row) }]))
+    const left = pool.length - (page + 1) * PAGE
+    previews.set(MORE, { description: `${left} sesiones más`, preview: `Ver las siguientes ${Math.min(PAGE, left)} de ${left} sesiones.` })
+    previews.set(FIRST, { preview: 'Volver a la primera página.' })
 
-    const question = pages > 1 ? `Elegí una sesión (página ${page + 1} de ${pages}) · "Type something" busca por título` : 'Elegí una sesión · "Type something" busca por título'
-    const answer = await ask($, question, options)
-    descriptions = new Map()
+    const question = pages > 1 ? `Elegí una sesión (página ${page + 1} de ${pages})` : 'Elegí una sesión'
+    const answer = await ask($, question, options, previews)
     if (answer === undefined) return undefined
     if (answer === MORE) { page++; continue }
     if (answer === FIRST) { pool = rows; page = 0; continue }
@@ -209,14 +230,23 @@ async function browse($: EngineInterface) {
     if (!row) return
 
     const title = clean(row.title)
+    const now = await $.clock.now()
+    const summary = sessionPreview(now, row)
     const actions = row.isRunning ? [OPEN, BACK] : [OPEN, DELETE, BACK]
-    const action = await ask($, `"${title}"`, actions)
+    const action = await ask($, `"${title}"`, actions, new Map<string, Extra>([
+      [OPEN, { preview: `Retomar esta conversación.\n\n${summary}` }],
+      [DELETE, { preview: `Borra esta conversación y sus temporales.\nTe pide confirmación.\n\n${summary}` }],
+      [BACK, { preview: 'Volver a la lista.' }],
+    ]))
     if (action === OPEN) {
       await $.command.run({ command: 'resume', args: row.id })
       return
     }
     if (action === DELETE) {
-      const sure = await ask($, `¿Eliminar "${title}"? No se puede deshacer.`, [CONFIRM, CANCEL])
+      const sure = await ask($, `¿Eliminar "${title}"? No se puede deshacer.`, [CONFIRM, CANCEL], new Map<string, Extra>([
+        [CONFIRM, { preview: `Se borra para siempre:\n\n${summary}` }],
+        [CANCEL, { preview: 'No se borra nada.' }],
+      ]))
       if (sure === CONFIRM) await remove($, row)
     }
     if (action === undefined) return
@@ -237,16 +267,5 @@ export const register: Register = on => {
     $.clock.after(0, () => void browse($))
 
     return {}
-  })
-
-  // Add the grey "time · branch · size" line under each session option.
-  on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
-    if (descriptions.size === 0) return next(e)
-    const questions = e.props.questions as { options?: { label: string; description?: string }[] }[]
-    const first = questions[0]
-    if (!first?.options) return next(e)
-    const options = first.options.map(option => ({ ...option, description: descriptions.get(option.label) ?? option.description ?? '' }))
-
-    return next({ ...e, props: { ...e.props, questions: [{ ...first, options }, ...questions.slice(1)] } })
   })
 }
