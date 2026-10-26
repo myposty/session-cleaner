@@ -157,16 +157,20 @@ function remove(id) {
   for (const tempRoot of tempRoots()) {
     for (const dir of readdir(tempRoot)) add(path.join(tempRoot, dir), id)
   }
+  const own = targets.filter(target => isOwnPath(target, id, parents) && fs.existsSync(target))
+  // One "progress <done> <total>" line per path, for the mod's progress bar.
+  process.stdout.write('progress 0 ' + own.length + '\n')
   let removed = 0
-  for (const target of targets) {
-    if (!isOwnPath(target, id, parents) || !fs.existsSync(target)) continue
+  for (const target of own) {
     fs.rmSync(target, { recursive: true, force: true })
     removed++
+    process.stdout.write('progress ' + removed + ' ' + own.length + '\n')
   }
   return { ok: true, removed }
 }
 
 const [command, arg] = process.argv.slice(2)
 const result = command === 'list' ? await list(arg) : command === 'delete' ? remove(arg) : { ok: false, reason: 'unknown-command' }
-process.stdout.write(JSON.stringify(result))
+// The result is always the last line.
+process.stdout.write(JSON.stringify(result) + '\n')
 `

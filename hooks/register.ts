@@ -37,7 +37,44 @@ async function helper($: EngineInterface, args: string[]): Promise<unknown> {
   })
   if (run.exitCode !== 0) throw new Error(run.stderr.slice(0, 500))
 
-  return JSON.parse(run.stdout)
+  return JSON.parse(lastLine(run.stdout))
+}
+
+function lastLine(text: string) {
+  return text.trim().split('\n').pop() ?? ''
+}
+
+const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+function bar(percent: number) {
+  const filled = Math.round(percent / 10)
+  return `${'█'.repeat(filled)}${'░'.repeat(10 - filled)}`
+}
+
+// Deletes with a live status line: spinner, bar and percentage, fed by the
+// helper's "progress <done> <total>" lines.
+async function deleteWithProgress($: EngineInterface, id: string, title: string) {
+  let percent = 0
+  let frame = 0
+  const draw = () => $.ui.status(`${SPINNER[frame++ % SPINNER.length]} Eliminando "${title}"  ${bar(percent)} ${percent}%`)
+  draw()
+  const stop = $.clock.every(80, draw)
+  let output = ''
+  try {
+    const stream = $.process.spawn({ argv: ['node', '--input-type=module', '-', 'delete', id], cwd: await homeDir($), input: HELPER })
+    for await (const chunk of stream) {
+      if (chunk.stream !== 'stdout') continue
+      output += chunk.text
+      for (const line of output.split('\n')) {
+        const match = /^progress (\d+) (\d+)$/.exec(line.trim())
+        if (match) percent = Number(match[2]) === 0 ? 100 : Math.round((Number(match[1]) / Number(match[2])) * 100)
+      }
+    }
+    return JSON.parse(lastLine(output)) as { ok: boolean; reason?: string }
+  } finally {
+    stop.cancel()
+    $.ui.status(undefined)
+  }
 }
 
 // Sessions are stored under the folder the session started in (what the
@@ -109,9 +146,15 @@ async function ask($: EngineInterface, question: string, options: string[]) {
 }
 
 async function remove($: EngineInterface, row: SessionRow) {
-  const result = (await helper($, ['delete', row.id])) as { ok: boolean; reason?: string }
-  if (result.ok) $.ui.toast(`Eliminada: ${clean(row.title)}`)
-  else $.ui.toast(result.reason === 'running' ? 'Esa sesión está abierta, cerrala primero.' : 'No se pudo eliminar.')
+  const title = clean(row.title)
+  try {
+    const result = await deleteWithProgress($, row.id, title)
+    if (result.ok) $.ui.toast(`✓ Eliminada: ${title}`)
+    else $.ui.toast(result.reason === 'running' ? 'Esa sesión está abierta, cerrala primero.' : 'No se pudo eliminar.')
+  } catch (error) {
+    $.ui.log(`session-cleaner: ${String(error)}`, { to: 'debug' })
+    $.ui.toast('No se pudo eliminar.')
+  }
 }
 
 // Shows pages of sessions until one is picked; undefined on Esc.
