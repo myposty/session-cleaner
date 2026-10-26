@@ -27,7 +27,8 @@ test('the trash deletes only the confirmed session', async ($, on) => {
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.close', () => ({ value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
-  on('session.cwd', () => ({ value: 'C:/project' }))
+  on('session.cwd', () => ({ value: 'C:/project/sub' }))
+  on('session.root', () => ({ value: 'C:/project' }))
   on('clock.now', () => ({ value: 0 }))
   on('process.run', (_, e) => {
     const args = e.argv.slice(3)
@@ -44,6 +45,8 @@ test('the trash deletes only the confirmed session', async ($, on) => {
   await $.command.run({ command: 'resume', args: '' })
   const ui = await $.ui.mount(PANE)
 
+  // Lists the folder the session started in, not where it cd'd to.
+  expect(helperCalls[0]).toEqual(['list', 'C:/project'])
   expect(await ui.find({ key: `trash-${A.id}` })).toBeDefined()
   expect(await ui.find({ key: `trash-${B.id}` })).toBeDefined()
   expect(await ui.find({ key: `trash-${OPEN.id}` })).toBeUndefined()

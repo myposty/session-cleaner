@@ -36,7 +36,12 @@ async function helper($: EngineInterface, args: string[]): Promise<unknown> {
 async function refresh($: EngineInterface) {
   await update($, status, () => 'Cargando sesiones…')
   try {
-    const rows = (await helper($, ['list', await $.session.cwd()])) as SessionRow[]
+    // Sessions are stored under the folder the session started in (what the
+    // built-in /resume lists), not wherever the session has cd'd since.
+    const root = await $.session.root()
+    let rows = (await helper($, ['list', root])) as SessionRow[]
+    const cwd = await $.session.cwd()
+    if (rows.length === 0 && cwd !== root) rows = (await helper($, ['list', cwd])) as SessionRow[]
     await update($, sessions, () => rows)
     await update($, status, () => (rows.length === 0 ? 'No hay sesiones en este proyecto.' : ''))
   } catch (error) {
@@ -88,10 +93,24 @@ function bytes(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
+// Emoji in a title draw two cells wide in most terminals but count as one,
+// which shifts the columns: titles are drawn without them.
+function clean(text: string) {
+  return text.replace(/[\p{Extended_Pictographic}️‍]/gu, '').replace(/\s+/g, ' ').trim()
+}
+
 function fit(text: string, width: number) {
-  if (text.length <= width) return text.padEnd(width)
+  if (text.length <= width) return text
   return `${text.slice(0, Math.max(1, width - 1))}…`
 }
+
+// Fixed columns: title takes the rest.
+const AGE = 12
+const SIZE = 9
+const ACTION = 8
+const GAP = 2
+// U+FE0F makes the bin an emoji everywhere, two cells wide on every side.
+const TRASH = '🗑️'
 
 export const register: Register = on => {
   on('command.run', { command: 'resume' }, async ($, e, next) => {
@@ -112,9 +131,17 @@ export const register: Register = on => {
     const pending = await read($, confirming)
     const query = (await read($, filter)).toLowerCase()
     const now = await $.clock.now()
-    const width = Math.max(30, e.props.bodyColumns ?? e.viewport?.columns ?? 80)
-    const titleWidth = Math.max(10, width - 30)
+    const width = Math.max(50, e.props.bodyColumns ?? e.viewport?.columns ?? 80)
+    const titleWidth = Math.max(12, width - AGE - SIZE - ACTION - GAP * 3 - 1)
     const shown = query === '' ? rows : rows.filter(row => row.title.toLowerCase().includes(query))
+
+    const columns = (key: string, title: unknown, ageCell: unknown, sizeCell: unknown, action: unknown) =>
+      h(Box, { key, flexDirection: 'row', columnGap: GAP },
+        h(Box, { width: titleWidth, flexShrink: 0 }, title),
+        h(Box, { width: AGE, flexShrink: 0 }, ageCell),
+        h(Box, { width: SIZE, flexShrink: 0, justifyContent: 'flex-end' }, sizeCell),
+        h(Box, { width: ACTION, flexShrink: 0 }, action),
+      )
 
     let search = null
     if (e.surface === 'terminal') {
@@ -128,30 +155,42 @@ export const register: Register = on => {
     }
 
     const confirmRow = (row: SessionRow) =>
-      h(Box, { key: `confirm-${row.id}`, flexDirection: 'row' },
-        h(Text, { color: 'red' }, `¿Eliminar "${fit(row.title, Math.max(10, titleWidth - 20)).trim()}"? `),
+      h(Box, { key: `confirm-${row.id}`, flexDirection: 'row', columnGap: GAP },
+        h(Box, { width: titleWidth, flexShrink: 0 },
+          h(Text, { color: 'red', wrap: 'truncate-end' }, `¿Eliminar "${fit(clean(row.title), titleWidth - 14)}"?`),
+        ),
         h(Button, { key: `yes-${row.id}`, label: 'Sí', variant: 'primary', onPress: () => void remove($, row) }),
-        h(Text, null, ' '),
         h(Button, { key: `no-${row.id}`, label: 'No', onPress: () => void update($, confirming, () => '') }),
       )
 
     const sessionRow = (row: SessionRow) =>
-      h(Box, { key: `row-${row.id}`, flexDirection: 'row' },
+      columns(
+        `row-${row.id}`,
         h(Button, { key: `open-${row.id}`, plain: true, onPress: () => void resume($, row) },
-          `${fit(row.title, titleWidth)} `,
-          h(Text, { dimColor: true }, `${fit(age(now, row.mtime), 14)}${bytes(row.size).padStart(8)}`),
+          h(Text, { wrap: 'truncate-end' }, fit(clean(row.title), titleWidth)),
         ),
-        h(Text, null, ' '),
+        h(Text, { dimColor: true }, age(now, row.mtime)),
+        h(Text, { dimColor: true }, bytes(row.size)),
         row.isRunning
-          ? h(Text, { dimColor: true }, '·')
-          : h(Button, { key: `trash-${row.id}`, plain: true, onPress: () => void update($, confirming, () => row.id) }, '🗑'),
+          ? h(Text, { dimColor: true }, 'abierta')
+          : h(Button, { key: `trash-${row.id}`, plain: true, onPress: () => void update($, confirming, () => row.id) }, TRASH),
       )
 
-    return h(Box, { flexDirection: 'column' },
+    return h(Box, { flexDirection: 'column', paddingX: 1 },
       search,
-      message !== '' ? h(Text, { dimColor: true }, message) : null,
+      h(Box, { marginTop: 1 },
+        columns('header',
+          h(Text, { bold: true }, 'Sesión'),
+          h(Text, { bold: true }, 'Última vez'),
+          h(Text, { bold: true }, 'Tamaño'),
+          null,
+        ),
+      ),
+      message !== '' ? h(Box, { marginTop: 1 }, h(Text, { dimColor: true }, message)) : null,
       ...shown.map(row => (pending === row.id ? confirmRow(row) : sessionRow(row))),
-      h(Text, { dimColor: true }, 'Enter abre · 🗑 elimina · · = abierta · Esc cierra'),
+      h(Box, { marginTop: 1 },
+        h(Text, { dimColor: true }, `Enter abre  ·  ${TRASH} elimina  ·  Esc cierra`),
+      ),
     ) as RenderElement
   })
 }
