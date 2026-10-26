@@ -21,7 +21,9 @@ const PANE = {
 
 test('the trash deletes only the confirmed session', async ($, on) => {
   const helperCalls: string[][] = []
+  const helperCwds: (string | undefined)[] = []
   const resumed: string[] = []
+  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/dummy' : undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.close', () => ({ value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
@@ -30,6 +32,7 @@ test('the trash deletes only the confirmed session', async ($, on) => {
   on('process.run', (_, e) => {
     const args = e.argv.slice(3)
     helperCalls.push(args)
+    helperCwds.push(e.init?.cwd)
     const stdout = args[0] === 'list' ? JSON.stringify([A, B, OPEN]) : JSON.stringify({ ok: true, removed: 5 })
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -61,5 +64,7 @@ test('the trash deletes only the confirmed session', async ($, on) => {
 
   await ui.press({ key: `open-${B.id}` })
   expect(resumed).toEqual([B.id])
+  // node never runs from the project folder (C:/project).
+  expect(helperCwds.every(cwd => cwd === '/home/dummy')).toBe(true)
   await ui.unmount()
 })

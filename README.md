@@ -16,7 +16,7 @@ Escribís `/resume`, ves tus sesiones del proyecto como siempre, y cada una tien
 
 ## Instalar
 
-Requisitos: Claude Code con soporte de mods y Node.js 18+ en el PATH.
+Requisitos: Claude Code con soporte de mods y Node.js 18+ en el PATH. Funciona en Windows, macOS y Linux, y respeta `CLAUDE_CONFIG_DIR` si movés la carpeta de Claude.
 
 En una sesión de Claude Code:
 
@@ -65,9 +65,17 @@ Solo rutas cuyo nombre es **exactamente** el id de la sesión elegida, dentro de
 - `~/.claude/file-history/<id>/`
 - `~/.claude/debug/<id>.txt`
 - `~/.claude/todos/<id>-*.json`
-- `<temp>/claude/<proyecto>/<id>/`: scratchpad y temporales
+- `<temp>/claude/<proyecto>/<id>/` (Windows) o `/tmp/claude-<uid>/<proyecto>/<id>/` (macOS/Linux): scratchpad y temporales
+
+`~/.claude` es `CLAUDE_CONFIG_DIR` si lo tenés definido.
 
 No toca otras sesiones, ni `history.jsonl`, ni configuración. Rechaza ids que no sean un UUID y sesiones que estén abiertas.
+
+## Seguridad
+
+- Borrar exige dos clicks en la pantalla (🗑 y después **Sí**). Ni el modelo ni otro plugin pueden apretar esos botones.
+- El script corre `node` desde tu carpeta de usuario, nunca desde el proyecto, para que un repo ajeno no pueda colar su propio `node`.
+- Sin shell: los argumentos van como lista y el script entra por stdin.
 
 **Borrar no se puede deshacer.**
 

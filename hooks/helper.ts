@@ -8,12 +8,26 @@ import path from 'node:path'
 import os from 'node:os'
 import readline from 'node:readline'
 
-const claudeHome = path.join(os.homedir(), '.claude')
+const claudeHome = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
 const projectsRoot = path.join(claudeHome, 'projects')
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+// Windows and macOS file systems ignore case; Linux does not.
+const isCaseInsensitive = process.platform === 'win32' || process.platform === 'darwin'
+// Claude cuts long project folder names and appends a hash.
+const MAX_PROJECT_NAME = 200
 
 function readdir(dir) {
   try { return fs.readdirSync(dir) } catch { return [] }
+}
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // EPERM: the process exists but belongs to another user.
+    return Boolean(error && error.code === 'EPERM')
+  }
 }
 
 function runningIds() {
@@ -23,11 +37,28 @@ function runningIds() {
     if (!file.endsWith('.json')) continue
     try {
       const record = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'))
-      process.kill(record.pid, 0)
-      ids.add(record.sessionId)
+      if (typeof record.pid === 'number' && isAlive(record.pid)) ids.add(record.sessionId)
     } catch {}
   }
   return ids
+}
+
+function isProjectDir(dir, key) {
+  const name = isCaseInsensitive ? dir.toLowerCase() : dir
+  const wanted = isCaseInsensitive ? key.toLowerCase() : key
+  if (wanted.length <= MAX_PROJECT_NAME) return name === wanted
+  return name.startsWith(wanted.slice(0, MAX_PROJECT_NAME))
+}
+
+// Where Claude keeps per-session temp folders: <tmp>/claude on Windows,
+// <tmp>/claude-<uid> on macOS and Linux.
+function tempRoots() {
+  const bases = new Set([os.tmpdir(), '/tmp'])
+  const names = ['claude']
+  if (typeof process.getuid === 'function') names.push('claude-' + process.getuid())
+  const roots = []
+  for (const base of bases) for (const name of names) roots.push(path.join(base, name))
+  return roots
 }
 
 function promptText(record) {
@@ -69,11 +100,11 @@ async function summarize(file) {
 }
 
 async function list(cwd) {
-  const key = cwd.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()
+  const key = cwd.replace(/[^a-zA-Z0-9]/g, '-')
   const running = runningIds()
   const byId = new Map()
   for (const dir of readdir(projectsRoot)) {
-    if (dir.toLowerCase() !== key) continue
+    if (!isProjectDir(dir, key)) continue
     for (const name of readdir(path.join(projectsRoot, dir))) {
       if (!name.endsWith('.jsonl')) continue
       const id = name.slice(0, -6)
@@ -116,8 +147,9 @@ function remove(id) {
   for (const name of readdir(todos)) {
     if (name === id + '.json' || (name.startsWith(id + '-') && name.endsWith('.json'))) add(todos, name)
   }
-  const tempRoot = path.join(os.tmpdir(), 'claude')
-  for (const dir of readdir(tempRoot)) add(path.join(tempRoot, dir), id)
+  for (const tempRoot of tempRoots()) {
+    for (const dir of readdir(tempRoot)) add(path.join(tempRoot, dir), id)
+  }
   let removed = 0
   for (const target of targets) {
     if (!isOwnPath(target, id, parents) || !fs.existsSync(target)) continue

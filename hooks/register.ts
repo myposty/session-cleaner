@@ -12,8 +12,19 @@ const status = atom({ plugin: 'session-cleaner', key: 'status' } as const, '')
 const confirming = atom({ plugin: 'session-cleaner', key: 'confirming' } as const, '')
 const filter = atom({ plugin: 'session-cleaner', key: 'filter' } as const, '')
 
+// Runs from the user's home, never the project folder: some platforms look up
+// a bare `node` in the working directory first, so an untrusted repo could
+// plant its own node binary.
+async function homeDir($: EngineInterface) {
+  const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'))
+  if (!home) throw new Error('no USERPROFILE or HOME to run node from')
+
+  return home
+}
+
 async function helper($: EngineInterface, args: string[]): Promise<unknown> {
   const run = await $.process.run(['node', '--input-type=module', '-', ...args], {
+    cwd: await homeDir($),
     stdin: HELPER,
     timeoutMs: 120_000,
   })
