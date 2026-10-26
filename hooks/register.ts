@@ -1,6 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { SessionRow } from '../types'
+import type { Leftover, SessionRow } from '../types'
 import { HELPER } from './helper'
 
 // /sessions uses Claude's own question dialog: it hides the prompt and owns
@@ -55,6 +55,46 @@ function bar(percent: number) {
   return `${'█'.repeat(filled)}${'░'.repeat(10 - filled)}`
 }
 
+// Looks for what the session downloaded or installed, with a spinner.
+async function findLeftovers($: EngineInterface, id: string) {
+  let frame = 0
+  const draw = () => $.ui.status(`${SPINNER[frame++ % SPINNER.length]} Buscando lo que bajó o instaló esta sesión…`)
+  draw()
+  const stop = $.clock.every(80, draw)
+  try {
+    return (await helper($, ['leftovers', id])) as Leftover[]
+  } catch (error) {
+    $.ui.log(`session-cleaner: ${String(error)}`, { to: 'debug' })
+    return []
+  } finally {
+    stop.cancel()
+    $.ui.status(undefined)
+  }
+}
+
+const KIND: Record<Leftover['kind'], string> = {
+  node_modules: 'node_modules',
+  venv: 'Entorno Python',
+  cache: 'Caché',
+  file: 'Descarga',
+  model: 'Modelo',
+  ollama: 'Modelo Ollama',
+  python: 'Librería Python',
+}
+
+function shortPath(text: string) {
+  return text.length > 60 ? `…${text.slice(-59)}` : text
+}
+
+function leftoversPreview(items: Leftover[]) {
+  if (items.length === 0) return 'No bajó ni instaló nada fuera de Claude.'
+  const total = items.reduce((sum, item) => sum + item.size, 0)
+  const lines = [`También lo que bajó o instaló (${bytes(total)}):`]
+  for (const item of items.slice(0, 12)) lines.push(`• ${KIND[item.kind]}  ${bytes(item.size)}`, `  ${shortPath(item.path)}`)
+  if (items.length > 12) lines.push(`… y ${items.length - 12} más`)
+  return lines.join('\n')
+}
+
 // Deletes with a live status line: spinner, bar and percentage, fed by the
 // helper's "progress <done> <total>" lines.
 async function deleteWithProgress($: EngineInterface, id: string, title: string) {
@@ -74,7 +114,7 @@ async function deleteWithProgress($: EngineInterface, id: string, title: string)
         if (match) percent = Number(match[2]) === 0 ? 100 : Math.round((Number(match[1]) / Number(match[2])) * 100)
       }
     }
-    return JSON.parse(lastLine(output)) as { ok: boolean; reason?: string }
+    return JSON.parse(lastLine(output)) as { ok: boolean; reason?: string; freed?: number }
   } finally {
     stop.cancel()
     $.ui.status(undefined)
@@ -169,7 +209,7 @@ async function remove($: EngineInterface, row: SessionRow) {
   const title = clean(row.title)
   try {
     const result = await deleteWithProgress($, row.id, title)
-    if (result.ok) $.ui.toast(`✓ Eliminada: ${title}`)
+    if (result.ok) $.ui.toast(result.freed ? `✓ Eliminada: ${title} · ${bytes(result.freed)} liberados` : `✓ Eliminada: ${title}`)
     else $.ui.toast(result.reason === 'running' ? 'Esa sesión está abierta, cerrala primero.' : 'No se pudo eliminar.')
   } catch (error) {
     $.ui.log(`session-cleaner: ${String(error)}`, { to: 'debug' })
@@ -243,8 +283,9 @@ async function browse($: EngineInterface) {
       return
     }
     if (action === DELETE) {
+      const extra = leftoversPreview(await findLeftovers($, row.id))
       const sure = await ask($, `¿Eliminar "${title}"? No se puede deshacer.`, [CONFIRM, CANCEL], new Map<string, Extra>([
-        [CONFIRM, { preview: `Se borra para siempre:\n\n${summary}` }],
+        [CONFIRM, { preview: `Se borra para siempre:\n\n${summary}\n\n${extra}` }],
         [CANCEL, { preview: 'No se borra nada.' }],
       ]))
       if (sure === CONFIRM) await remove($, row)

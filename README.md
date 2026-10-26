@@ -2,7 +2,7 @@
 
 Abrí y borrá conversaciones de Claude Code con `/sessions`.
 
-Escribís `/sessions` y aparece el diálogo propio de Claude con tus sesiones del proyecto (sin la caja de escribir). Elegís una con ↑↓ + Enter y decidís: **Abrir** o **Eliminar 🗑**. Al eliminar, esa conversación desaparece con todos sus temporales. Nada más que esa. `/resume` sigue siendo el original de Claude.
+Escribís `/sessions` y aparece el diálogo propio de Claude con tus sesiones del proyecto (sin la caja de escribir). Elegís una con ↑↓ + Enter y decidís: **Abrir** o **Eliminar 🗑**. Al eliminar, esa conversación desaparece con sus temporales y con lo que bajó o instaló: `node_modules`, entornos y librerías de Python, modelos, descargas. Nada de otras sesiones. `/resume` sigue siendo el original de Claude.
 
 ```
  Elegí una sesión (página 1 de 6)
@@ -72,6 +72,20 @@ Solo rutas cuyo nombre es **exactamente** el id de la sesión elegida, dentro de
 `~/.claude` es `CLAUDE_CONFIG_DIR` si lo tenés definido.
 
 No toca otras sesiones, ni `history.jsonl`, ni configuración. Rechaza ids que no sean un UUID y sesiones que estén abiertas.
+
+### Lo que la sesión bajó o instaló
+
+Cuenta solo lo que se **creó mientras la sesión corría** y que **la sesión nombró** en sus comandos (la carpeta donde hizo el install, el archivo que bajó, el modelo que pidió). Antes de confirmar ves la lista con tamaños.
+
+| Qué | Dónde lo busca |
+| --- | --- |
+| `node_modules`, `.venv`/`venv` (con `pyvenv.cfg`), `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox` | Carpetas donde trabajó la sesión |
+| Descargas grandes (`.iso`, `.gguf`, `.safetensors`, `.onnx`, `.zip`, `.whl`, `.msi`…, más de 1 MB) | Carpetas de la sesión, Descargas y temp |
+| Modelos de Hugging Face | `~/.cache/huggingface/hub` (`HF_HOME`/`HF_HUB_CACHE`) |
+| Modelos de Ollama | `ollama rm`, que respeta capas compartidas |
+| Librerías de Python del `pip install` global | `pip uninstall -y` |
+
+Nunca borra la carpeta del proyecto, tu carpeta de usuario ni nada dentro de `.git`.
 
 ## Seguridad
 
