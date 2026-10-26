@@ -1,6 +1,6 @@
 {
   "name": "session-cleaner",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "/resume with a trash button to delete local Claude Code sessions and their temp files",
   "author": { "name": "Brahian Riveros" },
   "license": "MIT",

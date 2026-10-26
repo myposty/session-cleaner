@@ -77,6 +77,17 @@ function promptText(record) {
   return text.replace(/\s+/g, ' ')
 }
 
+// "/exit", "/resume abc": a slash command the user ran, for sessions that
+// never got a typed prompt.
+function commandText(record) {
+  const content = record.message && record.message.content
+  if (typeof content !== 'string') return ''
+  const name = /<command-name>([^<]*)<\/command-name>/.exec(content)
+  if (!name) return ''
+  const args = /<command-args>([^<]*)<\/command-args>/.exec(content)
+  return (name[1].trim() + ' ' + (args ? args[1].trim() : '')).trim()
+}
+
 async function summarize(file) {
   const lines = readline.createInterface({
     input: fs.createReadStream(file, { encoding: 'utf8' }),
@@ -86,6 +97,7 @@ async function summarize(file) {
   let ai = ''
   let summary = ''
   let first = ''
+  const commands = []
   let messages = 0
   let branch = ''
   for await (const line of lines) {
@@ -100,11 +112,15 @@ async function summarize(file) {
       else if (line.startsWith('{"type":"summary"')) summary = JSON.parse(line).summary || summary
       else if (!first && line.includes('"type":"user"')) {
         const record = JSON.parse(line)
-        if (record.type === 'user') first = promptText(record)
+        if (record.type === 'user') {
+          first = promptText(record)
+          const command = commandText(record)
+          if (command && !commands.includes(command)) commands.push(command)
+        }
       }
     } catch {}
   }
-  const title = custom || ai || summary || first
+  const title = custom || ai || summary || first || commands.join(' · ')
   return { title: title ? title.slice(0, 200) : '', firstPrompt: first.slice(0, 600), messages, branch: branch === 'HEAD' ? '' : branch }
 }
 
