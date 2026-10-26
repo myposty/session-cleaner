@@ -55,7 +55,7 @@ O solo para una sesión: `claude --plugin-dir "C:\ruta\a\session-cleaner"`.
 | `Eliminar 🗑` → `Sí, eliminar` | Borra esa sesión y sus temporales |
 | Esc | Cierra |
 
-El diálogo de Claude muestra hasta 4 opciones, por eso la lista va de a 3 sesiones por página. A la derecha ves el detalle de la sesión marcada. Las sesiones abiertas en otra terminal dicen `abierta` y no se pueden borrar.
+El diálogo de Claude muestra hasta 4 opciones, por eso la lista va de a 3 sesiones por página. A la derecha ves el detalle de la sesión marcada. Las sesiones abiertas en otra terminal dicen `abierta`: al eliminarlas se cierra esa terminal (por su PID, solo si es un proceso de Claude) y después se borran. La sesión en la que estás no se puede eliminar.
 
 ## Qué borra exactamente
 
@@ -71,7 +71,7 @@ Solo rutas cuyo nombre es **exactamente** el id de la sesión elegida, dentro de
 
 `~/.claude` es `CLAUDE_CONFIG_DIR` si lo tenés definido.
 
-No toca otras sesiones, ni `history.jsonl`, ni configuración. Rechaza ids que no sean un UUID y sesiones que estén abiertas.
+No toca otras sesiones, ni `history.jsonl`, ni configuración. Rechaza ids que no sean un UUID y la sesión en la que estás.
 
 ### Lo que la sesión bajó o instaló
 

@@ -2,7 +2,8 @@
 // runtime has no fs delete, so listing and deleting happen here.
 //   list <cwd>  -> JSON SessionRow[] for that project, newest first
 //   leftovers <id> -> JSON Leftover[]: what the session downloaded or installed
-//   delete <id> -> JSON { ok, removed, freed } | { ok: false, reason }
+//   delete <id> <current id> -> JSON { ok, removed, freed } | { ok: false, reason };
+//     a session open in another Claude process is closed first.
 export const HELPER = String.raw`
 import fs from 'node:fs'
 import path from 'node:path'
@@ -32,17 +33,49 @@ function isAlive(pid) {
   }
 }
 
-function runningIds() {
-  const ids = new Set()
+// Live Claude processes from ~/.claude/sessions/<pid>.json: { pid, sessionId, file }.
+function liveRecords() {
+  const records = []
   const dir = path.join(claudeHome, 'sessions')
   for (const file of readdir(dir)) {
     if (!file.endsWith('.json')) continue
     try {
       const record = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'))
-      if (typeof record.pid === 'number' && isAlive(record.pid)) ids.add(record.sessionId)
+      if (typeof record.pid === 'number' && isAlive(record.pid)) records.push({ pid: record.pid, sessionId: record.sessionId, file: path.join(dir, file) })
     } catch {}
   }
-  return ids
+  return records
+}
+
+function runningIds() {
+  return new Set(liveRecords().map(record => record.sessionId))
+}
+
+// The pid must still be a Claude process: a stale record's pid can belong to
+// anything by now.
+function isClaudeProcess(pid) {
+  const run = process.platform === 'win32'
+    ? spawnSync('tasklist', ['/FI', 'PID eq ' + pid, '/FO', 'CSV', '/NH'], { cwd: os.homedir(), encoding: 'utf8', timeout: 15000 })
+    : spawnSync('ps', ['-p', String(pid), '-o', 'comm='], { cwd: os.homedir(), encoding: 'utf8', timeout: 15000 })
+  return run.status === 0 && /claude|node|bun/i.test(run.stdout || '')
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// Closes every Claude process that has this session open, by its own pid.
+async function closeSession(id) {
+  for (const record of liveRecords()) {
+    if (record.sessionId !== id) continue
+    if (!isClaudeProcess(record.pid)) continue
+    if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(record.pid), '/T', '/F'], { cwd: os.homedir(), timeout: 15000 })
+    else try { process.kill(record.pid, 'SIGTERM') } catch {}
+    for (let i = 0; i < 50 && isAlive(record.pid); i++) await sleep(100)
+    if (isAlive(record.pid)) return false
+    try { fs.rmSync(record.file, { force: true }) } catch {}
+  }
+  return !runningIds().has(id)
 }
 
 function isProjectDir(dir, key) {
@@ -346,9 +379,10 @@ function isOwnPath(target, id, parents) {
   return isOwnName && parents.has(path.resolve(path.dirname(target)))
 }
 
-async function remove(id) {
+async function remove(id, current) {
   if (!UUID.test(id)) return { ok: false, reason: 'invalid-id' }
-  if (runningIds().has(id)) return { ok: false, reason: 'running' }
+  if (id === current) return { ok: false, reason: 'current' }
+  if (runningIds().has(id) && !(await closeSession(id))) return { ok: false, reason: 'running' }
   // Read the transcript for leftovers before it is deleted.
   const extras = await leftovers(id)
   const parents = new Set()
@@ -388,10 +422,10 @@ async function remove(id) {
   return { ok: true, removed, freed: extras.reduce((sum, item) => sum + item.size, 0) }
 }
 
-const [command, arg] = process.argv.slice(2)
+const [command, arg, current] = process.argv.slice(2)
 const result = command === 'list' ? await list(arg)
   : command === 'leftovers' ? (UUID.test(arg || '') ? await leftovers(arg) : [])
-  : command === 'delete' ? await remove(arg)
+  : command === 'delete' ? await remove(arg, current)
   : { ok: false, reason: 'unknown-command' }
 // The result is always the last line.
 process.stdout.write(JSON.stringify(result) + '\n')

@@ -105,7 +105,8 @@ async function deleteWithProgress($: EngineInterface, id: string, title: string)
   const stop = $.clock.every(80, draw)
   let output = ''
   try {
-    const stream = $.process.spawn({ argv: ['node', '--input-type=module', '-', 'delete', id], cwd: await homeDir($), input: HELPER })
+    const current = await $.session.id()
+    const stream = $.process.spawn({ argv: ['node', '--input-type=module', '-', 'delete', id, current], cwd: await homeDir($), input: HELPER })
     for await (const chunk of stream) {
       if (chunk.stream !== 'stdout') continue
       output += chunk.text
@@ -210,7 +211,7 @@ async function remove($: EngineInterface, row: SessionRow) {
   try {
     const result = await deleteWithProgress($, row.id, title)
     if (result.ok) $.ui.toast(result.freed ? `✓ Eliminada: ${title} · ${bytes(result.freed)} liberados` : `✓ Eliminada: ${title}`)
-    else $.ui.toast(result.reason === 'running' ? 'Esa sesión está abierta, cerrala primero.' : 'No se pudo eliminar.')
+    else $.ui.toast(result.reason === 'current' ? 'No podés eliminar la sesión en la que estás.' : result.reason === 'running' ? 'No se pudo cerrar la ventana donde está abierta.' : 'No se pudo eliminar.')
   } catch (error) {
     $.ui.log(`session-cleaner: ${String(error)}`, { to: 'debug' })
     $.ui.toast('No se pudo eliminar.')
@@ -272,10 +273,15 @@ async function browse($: EngineInterface) {
     const title = clean(row.title)
     const now = await $.clock.now()
     const summary = sessionPreview(now, row)
-    const actions = row.isRunning ? [OPEN, BACK] : [OPEN, DELETE, BACK]
-    const action = await ask($, `"${title}"`, actions, new Map<string, Extra>([
+    // The dialog needs two options at least, so the current session gets a toast.
+    if (row.id === (await $.session.id())) {
+      $.ui.toast('Es la sesión en la que estás: no se puede eliminar desde acá.')
+      continue
+    }
+    const closes = row.isRunning ? 'Está abierta en otra ventana: se cierra esa ventana y se borra.\n' : ''
+    const action = await ask($, `"${title}"`, [OPEN, DELETE, BACK], new Map<string, Extra>([
       [OPEN, { preview: `Retomar esta conversación.\n\n${summary}` }],
-      [DELETE, { preview: `Borra esta conversación y sus temporales.\nTe pide confirmación.\n\n${summary}` }],
+      [DELETE, { preview: `Borra esta conversación y sus temporales.\n${closes}Te pide confirmación.\n\n${summary}` }],
       [BACK, { preview: 'Volver a la lista.' }],
     ]))
     if (action === OPEN) {
@@ -285,7 +291,7 @@ async function browse($: EngineInterface) {
     if (action === DELETE) {
       const extra = leftoversPreview(await findLeftovers($, row.id))
       const sure = await ask($, `¿Eliminar "${title}"? No se puede deshacer.`, [CONFIRM, CANCEL], new Map<string, Extra>([
-        [CONFIRM, { preview: `Se borra para siempre:\n\n${summary}\n\n${extra}` }],
+        [CONFIRM, { preview: `${closes}Se borra para siempre:\n\n${summary}\n\n${extra}` }],
         [CANCEL, { preview: 'No se borra nada.' }],
       ]))
       if (sure === CONFIRM) await remove($, row)
