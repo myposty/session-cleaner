@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
-const A = { id: 'aaaaaaaa-0000-4000-8000-000000000001', title: 'Sesion A', mtime: 0, size: 2048, isRunning: false }
-const B = { id: 'bbbbbbbb-0000-4000-8000-000000000002', title: 'Sesion B', mtime: 0, size: 4096, isRunning: false }
-const OPEN = { id: 'cccccccc-0000-4000-8000-000000000003', title: 'Sesion abierta', mtime: 0, size: 1, isRunning: true }
+const A = { id: 'aaaaaaaa-0000-4000-8000-000000000001', title: 'Sesion A', messages: 12, branch: 'main', mtime: 0, size: 2048, isRunning: false }
+const B = { id: 'bbbbbbbb-0000-4000-8000-000000000002', title: 'Sesion B', messages: 3, branch: '', mtime: 0, size: 4096, isRunning: false }
+const OPEN = { id: 'cccccccc-0000-4000-8000-000000000003', title: 'Sesion abierta', messages: 1200, branch: '', mtime: 0, size: 1, isRunning: true }
 
 const PANE = {
   plugin: 'session-cleaner',
@@ -48,6 +48,9 @@ test('the trash deletes only the confirmed session', async ($, on) => {
   // Lists the folder the session started in, not where it cd'd to.
   expect(helperCalls[0]).toEqual(['list', 'C:/project'])
   expect(await ui.find({ key: `trash-${A.id}` })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /12 mensajes · main · 2 KB/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /1\.200 mensajes/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '❯' })).toBeDefined()
   expect(await ui.find({ key: `trash-${B.id}` })).toBeDefined()
   expect(await ui.find({ key: `trash-${OPEN.id}` })).toBeUndefined()
 

@@ -84,7 +84,14 @@ async function summarize(file) {
   let ai = ''
   let summary = ''
   let first = ''
+  let messages = 0
+  let branch = ''
   for await (const line of lines) {
+    if (line.startsWith('{"parentUuid"') && line.includes('"isSidechain":false') && !line.includes('"isMeta":true')) {
+      if (line.includes('"type":"user"') || line.includes('"type":"assistant"')) messages++
+      const found = line.match(/"gitBranch":"([^"]*)"/)
+      if (found) branch = found[1]
+    }
     try {
       if (line.startsWith('{"type":"custom-title"')) custom = JSON.parse(line).customTitle || custom
       else if (line.startsWith('{"type":"ai-title"')) ai = JSON.parse(line).aiTitle || ai
@@ -96,7 +103,7 @@ async function summarize(file) {
     } catch {}
   }
   const title = custom || ai || summary || first
-  return title ? title.slice(0, 200) : ''
+  return { title: title ? title.slice(0, 200) : '', messages, branch: branch === 'HEAD' ? '' : branch }
 }
 
 async function list(cwd) {
@@ -111,9 +118,9 @@ async function list(cwd) {
       if (!UUID.test(id) || byId.has(id)) continue
       const file = path.join(projectsRoot, dir, name)
       const stat = fs.statSync(file)
-      const title = await summarize(file)
+      const { title, messages, branch } = await summarize(file)
       if (!title) continue
-      byId.set(id, { id, title, mtime: stat.mtimeMs, size: stat.size, isRunning: running.has(id) })
+      byId.set(id, { id, title, messages, branch, mtime: stat.mtimeMs, size: stat.size, isRunning: running.has(id) })
     }
   }
   return [...byId.values()].sort((a, b) => b.mtime - a.mtime)

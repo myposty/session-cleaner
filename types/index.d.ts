@@ -1,6 +1,8 @@
 export type SessionRow = {
   id: string
   title: string
+  messages: number
+  branch: string
   mtime: number
   size: number
   isRunning: boolean
@@ -13,6 +15,7 @@ declare module 'claude-code' {
       status: string
       confirming: string
       filter: string
+      focused: string
     }
   }
 }
