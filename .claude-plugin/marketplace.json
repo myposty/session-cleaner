@@ -1,0 +1,6 @@
+{
+  "name": "session-cleaner",
+  "description": "A trash button next to each session in Claude Code's /resume",
+  "owner": { "name": "Brahian Riveros" },
+  "plugins": [{ "name": "session-cleaner", "source": "./" }]
+}
