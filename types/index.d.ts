@@ -6,7 +6,17 @@ export type SessionRow = {
   branch: string
   mtime: number
   size: number
-  isRunning: boolean
+  // The Claude processes that have this session open; empty when closed.
+  openIn: OpenIn[]
+}
+
+export type OpenIn = {
+  pid: number
+  kind: 'terminal' | 'bg'
+  // The folder that process is working in.
+  cwd: string
+  // Claude's own word: 'busy', 'idle', 'waiting'.
+  status: string
 }
 
 // Something a session downloaded or installed; `path` is the package or

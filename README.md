@@ -8,7 +8,7 @@ Escribís `/sessions` y aparece el diálogo propio de Claude con tus sesiones de
  Elegí una sesión (página 1 de 6)
 
  ❯ 1. deleter_claude        │ deleter_claude
-   2. vocero                │ ahora · main · 6.7 MB · abierta
+   2. vocero                │ ahora · main · 6.7 MB · esta sesión
    3. Session-cleaner…      │ 412 mensajes
    4. Más ▸                 │
                             │ Primer mensaje:
@@ -55,7 +55,7 @@ O solo para una sesión: `claude --plugin-dir "C:\ruta\a\session-cleaner"`.
 | `Eliminar 🗑` → `Sí, eliminar` | Borra esa sesión y sus temporales |
 | Esc | Cierra |
 
-El diálogo de Claude muestra hasta 4 opciones, por eso la lista va de a 3 sesiones por página. A la derecha ves el detalle de la sesión marcada. Las sesiones abiertas en otra terminal dicen `abierta`: al eliminarlas se cierra esa terminal (por su PID, solo si es un proceso de Claude) y después se borran. La sesión en la que estás no se puede eliminar.
+El diálogo de Claude muestra hasta 4 opciones, por eso la lista va de a 3 sesiones por página. A la derecha ves el detalle de la sesión marcada. Cada sesión abierta dice dónde: `abierta en otra terminal (vocero)` o `abierta en segundo plano`, y el detalle muestra carpeta, estado y PID. La tuya dice `esta sesión`. Las abiertas en otro lado se pueden eliminar: al eliminarlas se cierra esa terminal (por su PID, solo si es un proceso de Claude) y después se borran. La sesión en la que estás no se puede eliminar.
 
 ## Qué borra exactamente
 

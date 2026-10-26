@@ -41,7 +41,16 @@ function liveRecords() {
     if (!file.endsWith('.json')) continue
     try {
       const record = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'))
-      if (typeof record.pid === 'number' && isAlive(record.pid)) records.push({ pid: record.pid, sessionId: record.sessionId, file: path.join(dir, file) })
+      if (typeof record.pid === 'number' && isAlive(record.pid)) {
+        records.push({
+          pid: record.pid,
+          sessionId: record.sessionId,
+          file: path.join(dir, file),
+          kind: record.kind === 'bg' ? 'bg' : 'terminal',
+          cwd: typeof record.cwd === 'string' ? record.cwd : '',
+          status: typeof record.status === 'string' ? record.status : '',
+        })
+      }
     } catch {}
   }
   return records
@@ -159,7 +168,12 @@ async function summarize(file) {
 
 async function list(cwd) {
   const key = cwd.replace(/[^a-zA-Z0-9]/g, '-')
-  const running = runningIds()
+  // Where each session is open: one entry per Claude process.
+  const openIn = new Map()
+  for (const record of liveRecords()) {
+    const where = { pid: record.pid, kind: record.kind, cwd: record.cwd, status: record.status }
+    openIn.set(record.sessionId, [...(openIn.get(record.sessionId) || []), where])
+  }
   const byId = new Map()
   for (const dir of readdir(projectsRoot)) {
     if (!isProjectDir(dir, key)) continue
@@ -171,7 +185,7 @@ async function list(cwd) {
       const stat = fs.statSync(file)
       const { title, firstPrompt, messages, branch } = await summarize(file)
       if (!title) continue
-      byId.set(id, { id, title, firstPrompt, messages, branch, mtime: stat.mtimeMs, size: stat.size, isRunning: running.has(id) })
+      byId.set(id, { id, title, firstPrompt, messages, branch, mtime: stat.mtimeMs, size: stat.size, openIn: openIn.get(id) || [] })
     }
   }
   return [...byId.values()].sort((a, b) => b.mtime - a.mtime)

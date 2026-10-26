@@ -1,6 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Leftover, SessionRow } from '../types'
+import type { Leftover, OpenIn, SessionRow } from '../types'
 import { HELPER } from './helper'
 
 // /sessions uses Claude's own question dialog: it hides the prompt and owns
@@ -157,11 +157,42 @@ function clean(text: string) {
   return text.replace(/[\p{Extended_Pictographic}️‍]/gu, '').replace(/\s+/g, ' ').trim()
 }
 
-function details(now: number, row: SessionRow) {
+const STATUS: Record<string, string> = { busy: 'trabajando', waiting: 'esperando respuesta', idle: 'sin actividad' }
+
+function folderName(cwd: string) {
+  return cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd
+}
+
+// "en otra terminal (games)" / "en segundo plano".
+function where(open: OpenIn) {
+  const place = open.kind === 'bg' ? 'en segundo plano' : 'en otra terminal'
+  return open.cwd !== '' ? `${place} (${folderName(open.cwd)})` : place
+}
+
+function openState(row: SessionRow, current: string) {
+  if (row.id === current) return 'esta sesión'
+  if (row.openIn.length === 0) return ''
+  return `abierta ${row.openIn.map(where).join(' y ')}`
+}
+
+// One line per Claude process that has the session open.
+function openLines(row: SessionRow) {
+  return row.openIn.map(open => {
+    const parts = [`Abierta ${open.kind === 'bg' ? 'en segundo plano' : 'en otra terminal'}`]
+    if (open.cwd !== '') parts.push(`carpeta ${open.cwd}`)
+    const status = STATUS[open.status]
+    if (status !== undefined) parts.push(status)
+    parts.push(`PID ${open.pid}`)
+    return parts.join(' · ')
+  })
+}
+
+function details(now: number, row: SessionRow, current: string) {
   const parts = [age(now, row.mtime)]
   if (row.branch !== '') parts.push(row.branch)
   parts.push(bytes(row.size))
-  if (row.isRunning) parts.push('abierta')
+  const state = openState(row, current)
+  if (state !== '') parts.push(state)
   return parts.join(' · ')
 }
 
@@ -200,8 +231,10 @@ async function ask($: EngineInterface, question: string, options: string[], prev
   }
 }
 
-function sessionPreview(now: number, row: SessionRow) {
-  const lines = [clean(row.title), details(now, row), `${count(row.messages)} mensajes`]
+function sessionPreview(now: number, row: SessionRow, current: string) {
+  const lines = [clean(row.title), details(now, row, current), `${count(row.messages)} mensajes`]
+  if (row.id === current) lines.push('', 'Es la sesión en la que estás.')
+  else if (row.openIn.length > 0) lines.push('', ...openLines(row))
   if (row.firstPrompt !== '') lines.push('', 'Primer mensaje:', clean(row.firstPrompt))
   return lines.join('\n')
 }
@@ -219,7 +252,7 @@ async function remove($: EngineInterface, row: SessionRow) {
 }
 
 // Shows pages of sessions until one is picked; undefined on Esc.
-async function pickSession($: EngineInterface, rows: SessionRow[]) {
+async function pickSession($: EngineInterface, rows: SessionRow[], current: string) {
   const now = await $.clock.now()
   let pool = rows
   let page = 0
@@ -229,7 +262,7 @@ async function pickSession($: EngineInterface, rows: SessionRow[]) {
     const options = [...labels.keys()]
     if (pages > 1) options.push(page + 1 < pages ? MORE : FIRST)
     if (options.length < 2) options.push(FIRST)
-    const previews = new Map<string, Extra>([...labels].map(([label, row]) => [label, { description: details(now, row), preview: sessionPreview(now, row) }]))
+    const previews = new Map<string, Extra>([...labels].map(([label, row]) => [label, { description: details(now, row, current), preview: sessionPreview(now, row, current) }]))
     const left = pool.length - (page + 1) * PAGE
     previews.set(MORE, { description: `${left} sesiones más`, preview: `Ver las siguientes ${Math.min(PAGE, left)} de ${left} sesiones.` })
     previews.set(FIRST, { preview: 'Volver a la primera página.' })
@@ -267,18 +300,21 @@ async function browse($: EngineInterface) {
       return
     }
 
-    const row = await pickSession($, rows)
+    const current = await $.session.id()
+    const row = await pickSession($, rows, current)
     if (!row) return
 
     const title = clean(row.title)
     const now = await $.clock.now()
-    const summary = sessionPreview(now, row)
+    const summary = sessionPreview(now, row, current)
     // The dialog needs two options at least, so the current session gets a toast.
-    if (row.id === (await $.session.id())) {
+    if (row.id === current) {
       $.ui.toast('Es la sesión en la que estás: no se puede eliminar desde acá.')
       continue
     }
-    const closes = row.isRunning ? 'Está abierta en otra ventana: se cierra esa ventana y se borra.\n' : ''
+    const closes = row.openIn.length > 0
+      ? `Está abierta ${row.openIn.map(where).join(' y ')}: se cierra ${row.openIn.length > 1 ? 'cada una' : 'esa ventana'} y se borra.\n`
+      : ''
     const action = await ask($, `"${title}"`, [OPEN, DELETE, BACK], new Map<string, Extra>([
       [OPEN, { preview: `Retomar esta conversación.\n\n${summary}` }],
       [DELETE, { preview: `Borra esta conversación y sus temporales.\n${closes}Te pide confirmación.\n\n${summary}` }],
