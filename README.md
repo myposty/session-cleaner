@@ -1,17 +1,23 @@
 # session-cleaner 🗑
 
-Borrá conversaciones de Claude Code desde `/resume`, con un 🗑 al lado de cada una.
+Abrí y borrá conversaciones de Claude Code con `/sessions`.
 
-Escribís `/resume`, ves tus sesiones del proyecto como siempre, y cada una tiene un 🗑. Lo tocás, confirmás, y esa conversación desaparece con todos sus temporales. Nada más que esa.
+Escribís `/sessions` y aparece el diálogo propio de Claude con tus sesiones del proyecto (sin la caja de escribir). Elegís una con ↑↓ + Enter y decidís: **Abrir** o **Eliminar 🗑**. Al eliminar, esa conversación desaparece con todos sus temporales. Nada más que esa. `/resume` sigue siendo el original de Claude.
 
 ```
- Sesiones
- ─────────────────────────────────────────────────────────────
-  End of era tribute site        hace 2 h        14.0 MB   🗑
-  vocero                         hace 5 min       3.1 MB   ·
-  Fix bracket ESPN               ayer           800 KB     🗑
- ─────────────────────────────────────────────────────────────
-  Enter abre · 🗑 elimina · · = abierta · Esc cierra
+ Elegí una sesión (página 1 de 6) · "Type something" busca por título
+
+ ❯ 1. deleter_claude
+      ahora · 6.7 MB · abierta
+   2. Session-cleaner plugin update
+      hace 26 min · 514 KB
+   3. vocero
+      hace 26 min · 174.1 MB · abierta
+   4. Más ▸
+      15 sesiones más
+   5. Type something.
+
+ Enter to select · ↑/↓ to navigate · Esc to cancel
 ```
 
 ## Instalar
@@ -45,15 +51,15 @@ O solo para una sesión: `claude --plugin-dir "C:\ruta\a\session-cleaner"`.
 
 | Acción | Qué hace |
 | --- | --- |
-| `/resume` | Abre la lista de sesiones del proyecto actual |
-| Escribir arriba | Filtra por título |
-| Enter sobre una sesión | La abre (usa el `/resume` original) |
-| Click en 🗑 | Pregunta `¿Eliminar "…"? [Sí] [No]` |
-| Sí | Borra esa sesión y sus temporales |
-| Esc | Cierra la lista |
-| `/resume <id>` | Va directo al `/resume` original, sin la lista |
+| `/sessions` | Abre la lista de sesiones del proyecto actual |
+| ↑↓ + Enter | Elige una sesión |
+| `Más ▸` | Siguientes 3 sesiones |
+| `Type something` | Busca por título |
+| `Abrir` | Retoma la sesión (usa el `/resume` original) |
+| `Eliminar 🗑` → `Sí, eliminar` | Borra esa sesión y sus temporales |
+| Esc | Cierra |
 
-Las sesiones abiertas en otra terminal se marcan con `·` y no se pueden borrar.
+El diálogo de Claude muestra hasta 4 opciones, por eso la lista va de a 3 sesiones por página. Las sesiones abiertas en otra terminal dicen `abierta` y no se pueden borrar.
 
 ## Qué borra exactamente
 

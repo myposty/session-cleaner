@@ -7,15 +7,3 @@ export type SessionRow = {
   size: number
   isRunning: boolean
 }
-
-declare module 'claude-code' {
-  interface PluginState {
-    'session-cleaner': {
-      sessions: Shaped<SessionRow[]>
-      status: string
-      confirming: string
-      filter: string
-      focused: string
-    }
-  }
-}

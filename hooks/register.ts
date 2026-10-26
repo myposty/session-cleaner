@@ -1,21 +1,23 @@
-import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderElement } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import type { SessionRow } from '../types'
 import { HELPER } from './helper'
 
-const PANE = 'session-cleaner'
-const sessions = atom({ plugin: 'session-cleaner', key: 'sessions' } as const, [], {
-  shape: 'sessions-2',
-})
-const status = atom({ plugin: 'session-cleaner', key: 'status' } as const, '')
-const confirming = atom({ plugin: 'session-cleaner', key: 'confirming' } as const, '')
-const filter = atom({ plugin: 'session-cleaner', key: 'filter' } as const, '')
-// Key of the element holding the focus ring, to draw the ❯ on its row.
-const focused = atom({ plugin: 'session-cleaner', key: 'focused' } as const, '')
+// /sessions uses Claude's own question dialog: it hides the prompt and owns
+// the arrow keys, like the built-in /resume. The dialog holds at most 4
+// options (Claude validates it, even on a redraw), so the list is paged:
+// 3 sessions and a "Más" option. Its free-text "Other" searches by title.
+const PAGE = 3
+const MORE = 'Más ▸'
+const FIRST = '◂ Volver al inicio'
+const OPEN = 'Abrir'
+const DELETE = 'Eliminar 🗑'
+const BACK = 'Volver'
+const CONFIRM = 'Sí, eliminar'
+const CANCEL = 'Cancelar'
 
-// U+FE0F makes the bin an emoji everywhere, two cells wide on every side.
-const TRASH = '🗑️'
+// Option label -> grey line under it, for the dialog that is up.
+let descriptions = new Map<string, string>()
 
 // Runs from the user's home, never the project folder: some platforms look up
 // a bare `node` in the working directory first, so an untrusted repo could
@@ -38,45 +40,15 @@ async function helper($: EngineInterface, args: string[]): Promise<unknown> {
   return JSON.parse(run.stdout)
 }
 
-async function refresh($: EngineInterface) {
-  await update($, status, () => 'Cargando sesiones…')
-  try {
-    // Sessions are stored under the folder the session started in (what the
-    // built-in /resume lists), not wherever the session has cd'd since.
-    const root = await $.session.root()
-    let rows = (await helper($, ['list', root])) as SessionRow[]
-    const cwd = await $.session.cwd()
-    if (rows.length === 0 && cwd !== root) rows = (await helper($, ['list', cwd])) as SessionRow[]
-    await update($, sessions, () => rows)
-    await update($, status, () => (rows.length === 0 ? 'No hay sesiones en este proyecto.' : ''))
-  } catch (error) {
-    $.ui.log(`session-cleaner: ${String(error)}`, { to: 'debug' })
-    await update($, status, () => 'No se pudieron leer las sesiones.')
-  }
-}
+// Sessions are stored under the folder the session started in (what the
+// built-in /resume lists), not wherever the session has cd'd since.
+async function loadSessions($: EngineInterface) {
+  const root = await $.session.root()
+  let rows = (await helper($, ['list', root])) as SessionRow[]
+  const cwd = await $.session.cwd()
+  if (rows.length === 0 && cwd !== root) rows = (await helper($, ['list', cwd])) as SessionRow[]
 
-// Deletes exactly the session confirmed on screen: the id comes from that
-// row and must still be the one pending confirmation.
-async function remove($: EngineInterface, row: SessionRow) {
-  if ((await read($, confirming)) !== row.id) return
-  await update($, confirming, () => '')
-  try {
-    const result = (await helper($, ['delete', row.id])) as { ok: boolean; reason?: string }
-    if (!result.ok) {
-      $.ui.toast(result.reason === 'running' ? 'Esa sesión está abierta, cerrala primero.' : 'No se pudo eliminar.')
-      return
-    }
-    await update($, sessions, list => list.filter(one => one.id !== row.id))
-    $.ui.toast(`Eliminada: ${clean(row.title)}`)
-  } catch (error) {
-    $.ui.log(`session-cleaner: ${String(error)}`, { to: 'debug' })
-    $.ui.toast('No se pudo eliminar.')
-  }
-}
-
-async function resume($: EngineInterface, row: SessionRow) {
-  await $.ui.close({ id: PANE })
-  await $.command.run({ command: 'resume', args: row.id })
+  return rows
 }
 
 function age(now: number, mtime: number) {
@@ -98,132 +70,136 @@ function bytes(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
-function count(value: number) {
-  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.')
-}
-
-// Emoji in a title draw two cells wide in most terminals but count as one,
-// which shifts the layout: titles are drawn without them.
+// Emoji in a title draw two cells wide in most terminals but count as one.
 function clean(text: string) {
   return text.replace(/[\p{Extended_Pictographic}️‍]/gu, '').replace(/\s+/g, ' ').trim()
 }
 
-function fit(text: string, width: number) {
-  if (text.length <= width) return text
-  return `${text.slice(0, Math.max(1, width - 1))}…`
-}
-
 function details(now: number, row: SessionRow) {
-  const parts = [age(now, row.mtime), `${count(row.messages)} mensajes`]
+  const parts = [age(now, row.mtime)]
   if (row.branch !== '') parts.push(row.branch)
   parts.push(bytes(row.size))
+  if (row.isRunning) parts.push('abierta')
   return parts.join(' · ')
 }
 
+// One unique label per session: repeated titles get their age appended.
+function labelSessions(now: number, rows: SessionRow[]) {
+  const labels = new Map<string, SessionRow>()
+  for (const row of rows) {
+    const title = clean(row.title).slice(0, 80) || 'Sin título'
+    let label = title
+    if (labels.has(label)) label = `${title} (${age(now, row.mtime)})`
+    for (let n = 2; labels.has(label); n++) label = `${title} (${n})`
+    labels.set(label, row)
+  }
+  return labels
+}
+
+async function ask($: EngineInterface, question: string, options: string[]) {
+  try {
+    return await $.ui.ask(question, { options, header: 'Sesiones' })
+  } catch {
+    return undefined // Esc
+  }
+}
+
+async function remove($: EngineInterface, row: SessionRow) {
+  const result = (await helper($, ['delete', row.id])) as { ok: boolean; reason?: string }
+  if (result.ok) $.ui.toast(`Eliminada: ${clean(row.title)}`)
+  else $.ui.toast(result.reason === 'running' ? 'Esa sesión está abierta, cerrala primero.' : 'No se pudo eliminar.')
+}
+
+// Shows pages of sessions until one is picked; undefined on Esc.
+async function pickSession($: EngineInterface, rows: SessionRow[]) {
+  const now = await $.clock.now()
+  let pool = rows
+  let page = 0
+  for (;;) {
+    const pages = Math.max(1, Math.ceil(pool.length / PAGE))
+    const labels = labelSessions(now, pool.slice(page * PAGE, page * PAGE + PAGE))
+    const options = [...labels.keys()]
+    if (pages > 1) options.push(page + 1 < pages ? MORE : FIRST)
+    if (options.length < 2) options.push(FIRST)
+    descriptions = new Map([...labels].map(([label, row]) => [label, details(now, row)]))
+    descriptions.set(MORE, `${pool.length - (page + 1) * PAGE} sesiones más`)
+
+    const question = pages > 1 ? `Elegí una sesión (página ${page + 1} de ${pages}) · "Type something" busca por título` : 'Elegí una sesión · "Type something" busca por título'
+    const answer = await ask($, question, options)
+    descriptions = new Map()
+    if (answer === undefined) return undefined
+    if (answer === MORE) { page++; continue }
+    if (answer === FIRST) { pool = rows; page = 0; continue }
+    const row = labels.get(answer)
+    if (row) return row
+    // Free text from "Other": search by title.
+    const query = answer.toLowerCase()
+    pool = rows.filter(one => one.title.toLowerCase().includes(query))
+    page = 0
+    if (pool.length === 0) {
+      $.ui.toast(`Ninguna sesión contiene "${answer}"`)
+      pool = rows
+    }
+  }
+}
+
+async function browse($: EngineInterface) {
+  for (;;) {
+    let rows: SessionRow[]
+    try {
+      rows = await loadSessions($)
+    } catch (error) {
+      $.ui.log(`session-cleaner: ${String(error)}`, { to: 'debug' })
+      $.ui.toast('No se pudieron leer las sesiones.')
+      return
+    }
+    if (rows.length === 0) {
+      $.ui.toast('No hay sesiones en este proyecto.')
+      return
+    }
+
+    const row = await pickSession($, rows)
+    if (!row) return
+
+    const title = clean(row.title)
+    const actions = row.isRunning ? [OPEN, BACK] : [OPEN, DELETE, BACK]
+    const action = await ask($, `"${title}"`, actions)
+    if (action === OPEN) {
+      await $.command.run({ command: 'resume', args: row.id })
+      return
+    }
+    if (action === DELETE) {
+      const sure = await ask($, `¿Eliminar "${title}"? No se puede deshacer.`, [CONFIRM, CANCEL])
+      if (sure === CONFIRM) await remove($, row)
+    }
+    if (action === undefined) return
+    // Volver, Cancelar or a finished delete: show the list again.
+  }
+}
+
 export const register: Register = on => {
-  on('command.run', { command: 'resume' }, async ($, e, next) => {
-    if (e.args.trim() !== '') return next(e)
-
-    await update($, confirming, () => '')
-    await update($, filter, () => '')
-    await update($, focused, () => '')
-    await $.ui.open({ id: PANE, title: 'Retomar sesión', focus: true, closeOnEscape: true })
-    await refresh($)
-
-    return {}
-  }).catch(($, e, next) => next(e))
-
-  on('ui.focus', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
-    await update($, focused, () => e.element ?? '')
+  on('session.start', async ($, e, next) => {
+    await $.command.register({ name: 'sessions', description: 'Ver, abrir y eliminar las sesiones de este proyecto' })
 
     return next(e)
   })
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
-    const rows = await read($, sessions)
-    const message = await read($, status)
-    const pending = await read($, confirming)
-    const ring = await read($, focused)
-    const query = (await read($, filter)).toLowerCase()
-    const now = await $.clock.now()
-    const width = Math.max(40, e.props.bodyColumns ?? e.viewport?.columns ?? 80)
-    const shown = query === '' ? rows : rows.filter(row => row.title.toLowerCase().includes(query))
-    const selectedId =
-      shown.find(row => ring === `open-${row.id}` || ring === `trash-${row.id}` || ring.endsWith(`-${row.id}`))?.id ??
-      shown[0]?.id
-    // Pointer (2) + action column (10) + gaps.
-    const titleWidth = Math.max(10, width - 16)
+  on('command.run', { command: 'sessions' }, async $ => {
+    // The dialog runs after the command returns: a hook the turn waits on
+    // cannot hold a question open.
+    $.clock.after(0, () => void browse($))
 
-    let search = null
-    if (e.surface === 'terminal') {
-      const { Input } = $.ui.resolve(e)
-      search = h(Input, {
-        key: 'filter',
-        placeholder: '⌕ Buscar…',
-        onInput: (value: string) => void update($, filter, () => value),
-        onSubmit: () => {},
-      })
-    }
+    return {}
+  })
 
-    const pointer = (isSelected: boolean, color?: string) =>
-      h(Box, { width: 2, flexShrink: 0 }, h(Text, { color: color ?? 'suggestion' }, isSelected ? '❯' : ' '))
+  // Add the grey "time · branch · size" line under each session option.
+  on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
+    if (descriptions.size === 0) return next(e)
+    const questions = e.props.questions as { options?: { label: string; description?: string }[] }[]
+    const first = questions[0]
+    if (!first?.options) return next(e)
+    const options = first.options.map(option => ({ ...option, description: descriptions.get(option.label) ?? option.description ?? '' }))
 
-    const confirmItem = (row: SessionRow) =>
-      h(Box, { key: `item-${row.id}`, flexDirection: 'column', marginBottom: 1 },
-        h(Box, { flexDirection: 'row' },
-          pointer(true, 'error'),
-          h(Text, { color: 'error', bold: true, wrap: 'truncate-end' }, `¿Eliminar "${fit(clean(row.title), titleWidth - 20)}"?`),
-        ),
-        h(Box, { flexDirection: 'row', paddingLeft: 2, columnGap: 2 },
-          h(Text, { dimColor: true }, 'No se puede deshacer.'),
-          h(Button, { key: `yes-${row.id}`, label: 'Sí, eliminar', variant: 'primary', onPress: () => void remove($, row) }),
-          h(Button, { key: `no-${row.id}`, label: 'Cancelar', autoFocus: true, onPress: () => void update($, confirming, () => '') }),
-        ),
-      )
-
-    const sessionItem = (row: SessionRow) => {
-      const isSelected = row.id === selectedId
-      const isTrashFocused = ring === `trash-${row.id}`
-      const action = row.isRunning
-        ? h(Text, { dimColor: true }, 'abierta')
-        : h(Button, { key: `trash-${row.id}`, plain: true, onPress: () => void update($, confirming, () => row.id) },
-            isTrashFocused ? h(Text, { color: 'error', bold: true }, `${TRASH} eliminar`) : h(Text, null, TRASH),
-          )
-
-      return h(Box, { key: `item-${row.id}`, flexDirection: 'column', marginBottom: 1 },
-        h(Box, { flexDirection: 'row' },
-          pointer(isSelected),
-          h(Box, { flexGrow: 1, flexShrink: 1, minWidth: 0 },
-            h(Button, {
-              key: `open-${row.id}`,
-              plain: true,
-              // The first session holds the ring when the list opens.
-              ...(ring === '' && row.id === shown[0]?.id ? { autoFocus: true as const } : {}),
-              onPress: () => void resume($, row),
-            },
-              h(Text, { bold: isSelected, color: isSelected ? 'suggestion' : 'text', wrap: 'truncate-end' }, fit(clean(row.title), titleWidth)),
-            ),
-          ),
-          h(Box, { width: 12, flexShrink: 0, justifyContent: 'flex-end' }, action),
-        ),
-        h(Box, { paddingLeft: 2 },
-          h(Text, { dimColor: true, wrap: 'truncate-end' }, details(now, row)),
-        ),
-      )
-    }
-
-    return h(Box, { flexDirection: 'column', paddingX: 1 },
-      h(Box, { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 1 },
-        h(Text, { bold: true, color: 'claude' }, 'Retomar sesión'),
-        h(Text, { dimColor: true }, rows.length === 0 ? '' : `${shown.length} de ${rows.length}`),
-      ),
-      search,
-      h(Box, { marginTop: 1, flexDirection: 'column' },
-        message !== '' ? h(Box, { marginBottom: 1 }, h(Text, { dimColor: true }, message)) : null,
-        ...shown.map(row => (pending === row.id ? confirmItem(row) : sessionItem(row))),
-      ),
-      h(Text, { dimColor: true }, `↑↓ navegar · Enter abrir · ${TRASH} eliminar · Esc salir`),
-    ) as RenderElement
+    return next({ ...e, props: { ...e.props, questions: [{ ...first, options }, ...questions.slice(1)] } })
   })
 }
